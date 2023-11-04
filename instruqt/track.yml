@@ -453,9 +453,9 @@ challenges:
     EOL
     ```
 
-    Now let's start Prometheus:
+    Now let's restart to pick up the config above Prometheus:
     ```bash
-    prometheus &
+    sudo systemctl restart prometheus
     ```
 
     Then after a couple seconds we can look for the metric `ebpf_exporter_counter`. you should see the bpf map exported as a prometheus metric.
@@ -754,4 +754,4 @@ lab_config:
   width: 25
   position: right
   enableLoadingMessages: true
-checksum: "15596579456627957493"
+checksum: "2432512758290502033"
