@@ -1,0 +1,65 @@
+#!/bin/bash
+
+#docker
+sudo apt-get update &&  
+sudo apt-get install ca-certificates curl gnupg lsb-release
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \
+  $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+sudo apt-get -y update
+
+curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+
+cat <<EOF >/etc/apt/sources.list.d/kubernetes.list
+deb http://apt.kubernetes.io/ kubernetes-xenial main
+EOF
+
+sudo apt-get update && sudo apt-get install -y vim telnet
+
+
+sudo swapoff -a
+sudo sed -i '/ swap / s/^/#/' /etc/fstab
+
+cat <<EOF | sudo tee /etc/modules-load.d/k8s.conf
+overlay
+br_netfilter
+EOF
+
+sudo modprobe overlay
+sudo modprobe br_netfilter
+
+# sysctl params required by setup, params persist across reboots
+cat <<EOF | sudo tee /etc/sysctl.d/k8s.conf
+net.bridge.bridge-nf-call-iptables  = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.ipv4.ip_forward                 = 1
+EOF
+
+sudo sysctl -w net.ipv6.conf.all.disable_ipv6=1
+sudo sysctl -w net.ipv6.conf.default.disable_ipv6=1
+sudo sysctl -w net.ipv6.conf.lo.disable_ipv6=1
+
+# Apply sysctl params without reboot
+sudo sysctl --system
+
+sudo apt-get install -y apt-transport-https ca-certificates curl prometheus
+sudo mkdir /etc/apt/keyrings || true
+
+echo "deb [signed-by=/etc/apt/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+sudo apt install -y kubelet kubeadm kubectl
+sudo apt install -y docker.io jq iputils-ping clang clang llvm libelf-dev libpcap-dev gcc-multilib build-essential make linux-tools-$(uname -r)
+
+sudo mkdir /etc/containerd || true
+containerd config default > /etc/containerd/config.toml
+sudo sed -i 's/ SystemdCgroup = false/ SystemdCgroup = true/' /etc/containerd/config.toml
+
+
+sudo systemctl restart containerd.service
+sudo systemctl restart kubelet.service
+sudo kubeadm config images pull
+
+echo 'alias k=kubectl' >> ~/.bashrc
+
+git clone https://github.com/asayah/ebpf-cni-from-scratch-kubecon-na-2023 tutorial 

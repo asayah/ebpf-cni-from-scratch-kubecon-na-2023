@@ -1,0 +1,753 @@
+slug: epbf-cni
+id: q7vjfkafsgzg
+title: CNI
+teaser: eBPF CNI
+description: eBPF technology is driving a transformative shift in the network stack,
+  enabling secure code execution within a protected kernel sandbox. This facilitates
+  instant metrics retrieval and the implementation of network routing and security
+  policies. Additionally, eBPF empowers us to reshape traffic at a low level with
+  XDP, which delivers high-performance programmable packet processing seamlessly integrated
+  with the kernel. This revolutionary impact extends to the Kubernetes networking
+  landscape, as eBPF serves as the core technology behind projects like Cilium and
+  its CNI plugin that provides high-performance network capabilities, but such powerful
+  technologies remain enigmatic for many. The objective of this workshop is to dive
+  into the inner workings of these technologies, participants will learn the basics
+  of eBPF and CNI, and they will gain hands-on experience in creating a CNI plugin
+  for Kubernetes utilizing eBPF, demystifying the underlying mechanics of eBPF-based
+  projects.
+icon: ""
+level: beginner
+tags:
+- cni
+owner: soloio
+developers:
+- adam.sayah@solo.io
+challenges:
+- slug: 1-exercice
+  id: ququtxngfm02
+  type: challenge
+  title: CNI implementation
+  teaser: Let's create our first CNI from scratch
+  assignment: |2-
+
+    In this exercise we will need a Kubernetes cluster to test, the following command will create a Kubernetes cluster with a Single node, without any CNI installed:
+
+    ```bash
+    kubeadm init --pod-network-cidr=10.10.0.0/16 --control-plane-endpoint=master:6443
+    ```
+
+    Run the following command to setup the Kubeconfig and have access to the Kubernetes API using kubectl:
+
+    ```bash
+    mkdir -p $HOME/.kube
+    sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+    sudo chown $(id -u):$(id -g) $HOME/.kube/config
+    ```
+
+    At this point we should see some pods started (the ones that don't need a CNI), run the following command:
+
+    ```
+    kubectl get po -A
+    ```
+
+    You should see the following:
+
+    ```
+    root@master:~# kubectl get po -A
+    NAMESPACE     NAME                             READY   STATUS    RESTARTS   AGE
+    kube-system   coredns-5dd5756b68-bfbdg         0/1     Pending   0          4s
+    kube-system   coredns-5dd5756b68-l8jhb         0/1     Pending   0          4s
+    kube-system   etcd-master                      1/1     Running   0          17s
+    kube-system   kube-apiserver-master            1/1     Running   0          17s
+    kube-system   kube-controller-manager-master   1/1     Running   0          17s
+    kube-system   kube-proxy-59f2t                 1/1     Running   0          4s
+    kube-system   kube-scheduler-master            1/1     Running   0          17s
+    ```
+
+    But some of the pods are in `Pending`,  It is time for us to work on the CNI.
+
+    # CNI
+    In Kubernetes, a CNI (Container Network Interface) is a standardized interface and a set of libraries that govern how networking works for containers in a cluster. CNI plugins are responsible for tasks like configuring network namespaces, interfaces, routes, and firewall rules for pod-to-pod communication. Kubernetes doesn't prescribe a specific network solution, giving flexibility to choose from various CNI plugins like Calico, Flannel, Weave, and more. These plugins offer different network models (e.g., overlay or underlay networks) to suit specific application and infrastructure requirements. CNI ensures seamless networking for pods and enables them to communicate effectively within the Kubernetes ecosystem.
+
+    In this tutorial we are going to build a CNI Plugin in Bash for simplicity, but often CNI are more complicated, golang seems like the language of choice and there are multiple CNI plugin examples in the CNI project repo on github.
+    Let start our CNI plugin, run the following command to create the CNI plugin file:
+
+
+    ```
+    cp tutorial/labs/cni/step1-skel ebpfcni
+    ```
+
+
+    This will be our structure of the CNI plugin, click now on the `Editor` tab, and let's review the file.
+
+    The CNI plugin boilerplate should include the following key functions:
+
+    **ADD**: This function is responsible for setting up the network for a container. It takes the CNI configuration and container's network namespace as input and returns the network configuration or an error in JSON format.
+
+    **DELETE**: This function handles the removal of network configuration when a container is deleted or stopped. It takes the CNI configuration and container's network namespace and is responsible for cleaning up resources.
+
+    We will now work the the ADD function, the first thing to learn is how the CNI plugin is invoked and what values are being passed.
+
+    - **Command**: The first argument specifies the command to execute, which can be one of the following:
+      - `add`: This command is used to add network configuration to a container.
+      - `del`: This command is used to delete network configuration when a container is removed.
+    - **CNI Configuration File (stdin)**: The CNI configuration is passed as JSON data via the standard input (stdin). This configuration file contains information about the network, IP address allocation, and other network settings required for the operation.
+    - **Container ID**: The ID or name of the container for which network configuration is being set up or removed. This identifier helps the CNI plugin associate the network configuration with the specific container.
+    - **NetNS Path**: The path to the network namespace of the container. This argument is passed to the CNI plugin to allow it to manipulate the network namespace of the container.
+    - **IfName**: The name of the network interface to be created for the container. This is the name of the interface within the container's network namespace.
+
+
+
+    ## Add
+
+    Here are the Steps we will follow to setup networking for our Pods, we will write the code in the CNI plugin to achieve the following:
+
+    - Retrieve the necessary information, such as the pod's CIDR and calculate the gateway IP.
+    - Create a network bridge if it doesn't already exist, assign an IP to the bridge, and bring it up.
+    - Generate a random IP for the container and create a virtual Ethernet (veth) pair, connecting one end to the container.
+    - Move the veth interface into the network namespace of the container.
+    - Configure the container's network settings, including setting up the network interface, assigning an IP address, and defining the default route.
+    - Retrieve the MAC address of the container's network interface.
+    - Format the network configuration details and print the result to stdout in a format expected by the Kubernetes Kubelet, complying with the CNI specification.
+
+    Run the following command to add the "add" capability to the CNI plugin:
+
+    ```bash
+    cp tutorial/labs/cni/step2-add ebpfcni
+    ```
+    Let's review the code now in the `Editor` tab.
+
+    We are ready now to handle the delete scenario.
+
+
+    ## Del
+
+    Now, it is time to implement the Del function, this is invoked when the pod is getting deleted:
+    - We will delete the network container
+
+    Run the following command to add the "delete" capability to the CNI plugin:
+
+    ```bash
+    cp tutorial/labs/cni/step3-del ebpfcni
+    ```
+    Let's review the code now in the `Editor` tab.
+
+
+    # Configure the CNI:
+
+    As discussed previously, we need to pass the configuration to the CNI plugin, the CNI plugin we wrote the previous step requires the Node pod CIDR, let create the file:
+
+    ```bash
+    cat <<EOT >> 10-ebpfcni.conf
+    {
+      "cniVersion":"1.0.0",
+      "name":"ebpfcni",
+      "type":"ebpfcni",
+      "podcidr":"10.10.0.0/24"
+    }
+    EOT
+    ```
+
+    We are ready now to test our CNI Plugin.
+
+    # Testing
+
+    Let create some apps to test the CNI plugin:
+
+    ```bash
+    kubectl taint nodes --all  node-role.kubernetes.io/control-plane-
+    kubectl create -f https://raw.githubusercontent.com/istio/istio/master/samples/httpbin/httpbin.yaml
+    kubectl apply -f https://raw.githubusercontent.com/istio/istio/master/samples/sleep/sleep.yaml
+
+    ```
+
+    You Should see the following:
+
+    ```text
+    k get po
+    NAME                       READY   STATUS    RESTARTS   AGE
+    httpbin-65975d4c6f-d2cp8   0/1     Pending   0          9s
+    sleep-7656cf8794-52x28     0/1     Pending   0          6s
+    ```
+
+    At this point, some pods are still in `Pending`, meaning they couldn't get started.
+    Now that we have all the component needed to make the networking work. to setup our CNI plugin in the node, we need to move the binary under `/opt/cni/bin/` and the configuration file under `/etc/cni/net.d/`, run the following commands:
+
+    ```bash
+    cp ebpfcni /opt/cni/bin/
+    cp 10-ebpfcni.conf /etc/cni/net.d/
+    ```
+
+    Give it a couple seconds then run the following command:
+
+    ```bash
+    kubectl get po -owide
+    ```
+
+    You should see the following:
+
+    ```text
+    root@master:~# k get po
+    NAME                       READY   STATUS    RESTARTS   AGE
+    httpbin-65975d4c6f-d2cp8   1/1     Running   0          94s
+    sleep-7656cf8794-52x28     1/1     Running   0          91s
+    ```
+
+
+
+    Awesome! Now all our pods are stared! this means our CNI plugin worked.
+
+    Now it is time to test the connectivity between the pods, by default the host is treating any communication from and to 10.10.0.0/16 (Kubernetes pods), as external traffic.
+    To make the host accept traffic from and to 10.10.0.0/16 run the following command:
+
+    ```bash
+    iptables -t filter -A FORWARD -s 10.10.0.0/16 -j ACCEPT
+    iptables -t filter -A FORWARD -d 10.10.0.0/16  -j ACCEPT
+    ```
+
+    if we make the same call:
+
+    ```bash
+
+    # make sure all the pods are running:
+    kubectl wait pod --all --for=condition=Ready --namespace=default
+    kubectl exec deploy/sleep curl httpbin:8000/get
+    ```
+
+    We should see now a response from the pod:
+
+    ```
+    kubectl exec [POD] [COMMAND] is DEPRECATED and will be removed in a future version. Use kubectl exec [POD] -- [COMMAND] instead.
+    % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                  Dload  Upload   Total   Spent    Left  Speed
+    100   185  100   185    0     0  84014      0 --:--:-- --:--:-- --:--:-- 92500
+    {
+      "args": {},
+      "headers": {
+        "Accept": "*/*",
+        "Host": "httpbin:8000",
+        "User-Agent": "curl/8.4.0"
+      },
+      "origin": "10.10.0.170",
+      "url": "http://httpbin:8000/get"
+    }
+
+    ```
+
+    Congratulation! you created your first CNI plugin! in the Next exercise we will explore the basic of eBPF, click on `Check` when you are ready to continue.
+  tabs:
+  - title: Terminal
+    type: terminal
+    hostname: master
+  - title: Editor
+    type: code
+    hostname: master
+    path: /root/ebpfcni
+  difficulty: ""
+  timelimit: 3600
+- slug: 2-exercice
+  id: qacgvutjun18
+  type: challenge
+  title: eBPF basics
+  teaser: Let's create our first eBPF code
+  assignment: |2-
+
+    # eBPF
+
+    in this section we will lean about ebpf basics, eBPF, or extended Berkeley Packet Filter, is a versatile and lightweight virtual machine that runs within the Linux kernel. It allows for efficient, customizable packet filtering, monitoring, and tracing of network events and system behavior, making it a powerful tool for networking and performance analysis in the Linux ecosystem.
+
+    # eBPF + CNI
+
+    eBPF (extended Berkeley Packet Filter) is often used in conjunction with Container Network Interfaces (CNIs) to enhance container networking in Kubernetes and other container orchestration platforms. CNIs are responsible for managing container networking, and eBPF can be employed in the following ways within this context:
+
+    **Network Monitoring and Security:** eBPF can be used to capture and analyze network traffic between containers, helping with monitoring, intrusion detection, and security enforcement.
+
+    **Network Performance Optimization:** eBPF allows for real-time network performance analysis and tuning. It can help identify and resolve network bottlenecks or latency issues in containerized environments.
+
+    **Dynamic Load Balancing:** eBPF can be used to implement dynamic load balancing and traffic routing for containerized applications, optimizing resource utilization and ensuring high availability.
+
+    **Policy Enforcement:** eBPF can enforce network policies and access control rules to enhance the security of container communications. It can restrict which containers can communicate with each other and enforce firewall-like rules.
+
+    **Telemetry and Observability:** eBPF can collect valuable telemetry data, such as metrics and tracing information, which can be used to monitor and troubleshoot network and application performance.
+
+    By combining eBPF with CNIs, organizations can achieve greater control, observability, and security in their containerized environments while maintaining high performance.
+
+
+    # your first eBPF program
+
+    Let's create our first eBPF program, eBPF programs are written in C, the following code will just print a log in the kernel when a packet is received, run the following command:
+
+
+    ```bash
+    cp  tutorial/labs/ebpf/kernel/step1-basic.bpf.c ebpfcni.bpf.c
+
+    ```
+
+    Open the `Editor` tab, and let's review the code.
+
+    When done reviewing the code, let's build the eBPF code, run the following command:
+    note: We are using the library libbpf to build our code, so we are clone the repo locally first.
+
+    ```bash
+    git clone https://github.com/libbpf/libbpf
+
+    # Now we build the ebpf code
+    clang -O2 -Ilibbpf/src -g  -target bpf -c ebpfcni.bpf.c -o  ebpfcni.bpf.o
+    ```
+
+    Now we should see an ebpfcni.bpf.o file generated, we can now load the program using bpftool:
+    note: we are using bpftool for simplicity, there other ways to load the bpf program, libbpf, golang eBPF...
+
+    ```bash
+    bpftool prog load ebpfcni.bpf.o  /sys/fs/bpf/ebpfcni
+    ```
+    Now our eBPF code has been loaded and can be attached to network interfaces. we are going to attach to ao any interface created by the CNI plugin, let's modify the CNI Plugin so that after any creation of a pod we attach the eBPF program to it.
+
+    ```bash
+    cp tutorial/labs/cni/step4-ebpf ebpfcni
+    ```
+    We will update now our CNI plugin, so the the new pods created will have the eBPF program attached to their networking automatically:
+
+    ```bash
+    cp ebpfcni /opt/cni/bin/
+    ```
+
+    Let's now recreate the pods to test the eBPF program:
+
+    ```bash
+    kubectl delete po --all
+    kubectl wait pod --all --for=condition=Ready --namespace=default
+    ```
+
+    When the pods start, we will make some request to see our eBPF code in action:
+
+    ```bash
+    httpbin_pod_ip=`kubectl get pods -l app=httpbin -o=jsonpath='{.items[0].status.podIP}'`
+    kubectl exec deploy/sleep curl $httpbin_pod_ip/get
+    ```
+    You should get responses from the httpbin app, but let's check now if the eBPF code worked, run the following command to retrieve kernel logs:
+
+    ```bash
+    cat /sys/kernel/debug/tracing/trace
+    ```
+    you should see the following
+
+    ```
+    curl-8710    [005] d.s11  1813.987584: bpf_trace_printk: Got TCP packet from a0a0026
+    curl-8710    [005] d.s11  1813.987585: bpf_trace_printk: Got TCP packet to a0a00f3
+    ```
+
+    Congrats! you created your first eBPF program and attached it automatically to the container interface using the CNI plugin.
+    In the next exercise, we will see how to use eBPF to generate some monitoring data.
+  tabs:
+  - title: Terminal
+    type: terminal
+    hostname: master
+  - title: Editor (eBPF)
+    type: code
+    hostname: master
+    path: /root/ebpfcni.bpf.c
+  - title: Editor (CNI plugin)
+    type: code
+    hostname: master
+    path: /root/ebpfcni
+  difficulty: ""
+  timelimit: 3600
+- slug: 3-exercice
+  id: cic6ezned2bs
+  type: challenge
+  title: eBPF for Monitoring
+  teaser: eBPF for Monitoring
+  assignment: |2-
+
+    # eBPF Maps
+    eBPF (Extended Berkeley Packet Filter) maps are a fundamental data structure in the eBPF framework, used for efficient and flexible sharing of data between eBPF programs and the kernel or user space. They act as key-value stores that allow eBPF programs to store, retrieve, and update data, enabling a wide range of use cases such as networking, tracing, and monitoring within the Linux kernel.
+    In the previous example we logged the source and dest of the packet received on certain interfaces, in this following example we will use an eBPF map to store the count of the TCP ipv4 packets sent by a source.
+
+    We are going to create an eBPF map of type Hashmap, the key will be the source Ip and the value will be the packet count.
+    Here is how the map looks like:
+
+    ```text
+
+    struct {
+        __uint(type, BPF_MAP_TYPE_HASH);
+        __uint(max_entries, MAX_ENTRIES);
+        __uint(key_size, sizeof(__u32));
+        __uint(value_size, sizeof(__u64));
+        __uint(pinning, LIBBPF_PIN_BY_NAME);
+    } counter
+    ```
+
+    Let's take a look at the code and how it uses the map to persist the data:
+
+    ```bash
+    cp  tutorial/labs/ebpf/kernel/step2-monitoring.bpf.c ebpfcni.bpf.c
+    ```
+
+    Open the `Editor (eBPF)` tab, and let's review the configuration.
+
+
+    Now, we can recompile the code and update the loaded eBPF program:
+
+    ```bash
+    clang -O2 -Ilibbpf/src -g  -target bpf -c ebpfcni.bpf.c -o  ebpfcni.bpf.o
+    rm -rf /sys/fs/bpf/ebpfcni
+    bpftool prog load ebpfcni.bpf.o  /sys/fs/bpf/ebpfcni
+    ```
+
+    The CNI plugin should now be able to attach the updated eBPF program, let's test this:
+
+    ```
+    # Force the creation of new pods so we attach the update bpf program
+    kubectl delete po --all
+    kubectl wait pod --all --for=condition=Ready --namespace=default
+    ```
+
+    Let's now generate some traffic:
+
+    ```bash
+      httpbin_pod_ip=`kubectl get pods -l app=httpbin -o=jsonpath='{.items[0].status.podIP}'`
+      kubectl exec deploy/sleep curl $httpbin_pod_ip/get
+    ```
+
+    Let see if it worked, run the following command to read the bpf map data:
+
+    ```bash
+    bpftool map dump name counter
+    ```
+
+    You should see the following:
+
+    ```text
+    key: 0a 0a 00 e3  value: 0e 00 00 00 00 00 00 00
+    key: 0a 0a 00 15  value: 0a 00 00 00 00 00 00 00
+    ```
+
+    # eBPF exporter
+    Now that we have the data in a map there we need what we call a user space program to read the data from it, for this exercise we will use a tool that reads map and create Prometheus formatted metric from an eBPF map, called ebpf_exporter, run the following command to start it:
+    ```bash
+    cp tutorial/ebpf_exporter/* .
+    sudo ./ebpf_exporter --config.dir=. --config.names=ebpfcni &
+    ```
+    Now the ebpf exporter is started let's check the metrics exposed:
+
+    ```bash
+    curl localhost:9435/metrics | grep ebpf_exporter_counter
+    ```
+    As you can see, we had easily created a metrics that can be exported to Prometheus, counting the number of packet sent by a source.
+
+    ```bash
+    cat > /etc/prometheus/prometheus.yml << EOL
+    global:
+      scrape_interval: 5s
+      external_labels:
+        monitor: 'bpfmap-monitor'
+    scrape_configs:
+      - job_name: 'ebpf'
+        static_configs:
+          - targets: ['localhost:9435']
+    EOL
+    ```
+
+    Now let's start Prometheus:
+    ```bash
+    prometheus &
+    ```
+
+    Then after a couple seconds we can look for the metric `ebpf_exporter_counter`. you should see the bpf map exported as a prometheus metric.
+
+    Amazing!, one last lab to go, we will learn now how to block the traffic using eBPF, click on check when you are ready.
+  tabs:
+  - title: Terminal
+    type: terminal
+    hostname: master
+  - title: Editor (eBPF)
+    type: code
+    hostname: master
+    path: /root/ebpfcni.bpf.c
+  - title: Editor (CNI plugin)
+    type: code
+    hostname: master
+    path: /root/ebpfcni
+  - title: Prometheus
+    type: service
+    hostname: master
+    path: /
+    port: 9090
+  difficulty: ""
+  timelimit: 3600
+- slug: 4-exercice
+  id: cpq3malajywo
+  type: challenge
+  title: eBPF for Security
+  teaser: eBPF for Security
+  assignment: |2-
+
+    # eBPF Maps
+    eBPF (extended Berkeley Packet Filter) can be used for security by enabling fine-grained, low-level monitoring and control of network and system activities in real-time. It can enforce security policies, detect and prevent anomalies, and filter malicious traffic by intercepting and analyzing data at various kernel points, without the need for kernel modifications. This allows for more efficient and flexible security solutions, making eBPF a powerful tool for threat detection, mitigation, and monitoring in complex environments, such as Kubernetes clusters or cloud infrastructure.
+    In this example we will use an eBPF code to block conditionally the traffic between two services.
+
+    For this exercise we will create a new map, here is how it will look like:
+
+
+    Here is how the map looks like:
+
+    ```text
+    struct ip_pair {
+        __u32 saddr;
+        __u32 daddr;
+    };
+
+    struct {
+        __uint(type, BPF_MAP_TYPE_HASH);
+        __uint(max_entries, MAX_ENTRIES);
+        __type(key, struct ip_pair);
+        __type(value, int);
+        __uint(pinning, LIBBPF_PIN_BY_NAME);
+    } iprules SEC(".maps");
+
+    ```
+
+    We are going to use a pair sourceIp-destIp as key and the value 0 or 1 to allow the traffic between the source and destination.
+
+    Let's take a look at the updated bpf code:
+
+    ```bash
+    cp  tutorial/labs/ebpf/kernel/step3-security.bpf.c ebpfcni.bpf.c
+    ```
+
+    Open the `Editor (eBPF)` tab, and let's review the configuration.
+
+
+    Now, we can recompile the code and update the loaded eBPF program:
+
+    ```bash
+    clang -O2 -Ilibbpf/src -g  -target bpf -c ebpfcni.bpf.c -o  ebpfcni.bpf.o
+    rm -rf /sys/fs/bpf/ebpfcni
+    bpftool prog load ebpfcni.bpf.o  /sys/fs/bpf/ebpfcni
+    ```
+
+    The CNI plugin should now be able to attach the updated eBPF program, let's test this:
+
+    ```
+    # Force the creation of new pods so we attach the update bpf program
+    kubectl delete po --all
+    kubectl wait pod --all --for=condition=Ready --namespace=default
+    ```
+
+    Let's now generate some traffic:
+
+    ```bash
+      httpbin_pod_ip=`kubectl get pods -l app=httpbin -o=jsonpath='{.items[0].status.podIP}'`
+      kubectl exec deploy/sleep curl $httpbin_pod_ip/get
+    ```
+
+    Let see if it worked, run the following command to read the bpf map data:
+
+    ```bash
+    bpftool map dump name iprules
+    ```
+
+    You should see the following:
+
+    ```text
+    [{
+            "key": {
+                "saddr": 168427585,
+                "daddr": 168427685
+            },
+            "value": 1
+        },{
+            "key": {
+                "saddr": 168427685,
+                "daddr": 168427585
+            },
+            "value": 1
+        }
+    ]
+    ```
+
+    We see that by default, we are allowing the traffic between all these IPs, Now we will work the user space code, where we can interact with the BPF map to explicitly drop the traffic between two IPs.
+
+    # User Space App
+
+
+    ```bash
+    cp tutorial/full/ebpf/user/ebpfcni.c  .
+    ```
+    Let's review the code of the User space. open the `Editor (eBPF - Userspace)`.
+
+    For this tutorial the userspace code has aready been built, you can get the binary using:
+
+    ```
+    cp tutorial/full/ebpf/user/bin/iprules .
+    ```
+    Note: If interested in learning how to build userspace and kernel space programs, check the libbpf-bootstrap project on github, the project contains a lot of great examples.
+
+    Let's try the user space program now, let's first make sure first the communication between sleep and httpbin pods work:
+
+    ```bash
+    httpbin_pod_ip=`kubectl get pods -l app=httpbin -o=jsonpath='{.items[0].status.podIP}'`
+    kubectl exec deploy/sleep curl $httpbin_pod_ip/get
+    ```
+
+    We should see a response:
+
+    ```
+    kubectl exec [POD] [COMMAND] is DEPRECATED and will be removed in a future version. Use kubectl exec [POD] -- [COMMAND] instead.
+    % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                  Dload  Upload   Total   Spent    Left  Speed
+    100   185  100   185    0     0  84014      0 --:--:-- --:--:-- --:--:-- 92500
+    {
+      "args": {},
+      "headers": {
+        "Accept": "*/*",
+        "Host": "httpbin:8000",
+        "User-Agent": "curl/8.4.0"
+      },
+      "origin": "10.10.0.170",
+      "url": "http://httpbin:8000/get"
+    }
+
+    ```
+
+    But now if we add a rule (insert in the bpf map):
+
+    ```
+      source_ip=`kubectl get pods -l app=sleep -o=jsonpath='{.items[0].status.podIP}'`
+      dest_ip=`kubectl get pods -l app=httpbin -o=jsonpath='{.items[0].status.podIP}'`
+      ./iprules $source_ip $dest_ip 0
+
+    ```
+
+    if we check the bpf map we should see the value:
+
+    ```bash
+    bpftool map dump name iprules
+    ```
+
+    returns:
+
+    ```
+    ...
+    {
+        "key": {
+            "saddr": 168427585,
+            "daddr": 168427685
+        },
+        "value": 0
+    },
+    ```
+
+    This means the value now exist in the BPF map.
+    Let's test the connectivity now:
+
+    ```
+    httpbin_pod_ip=`kubectl get pods -l app=httpbin -o=jsonpath='{.items[0].status.podIP}'`
+    kubectl exec deploy/sleep curl $httpbin_pod_ip/get
+    ```
+
+    We should not receive any response, this means all the packets between these two ips are dropped, this is how eBPF enforces security policies to restrict the traffic to IPs and ports.
+
+    ## Network Policy
+    Network Policies in Kubernetes are a way to define and control the communication between pods (groupings of containers) within a Kubernetes cluster. They allow you to specify rules that determine which pods can communicate with each other and on what network ports and protocols. Network Policies help enhance the security and isolation of your applications in a multi-tenant environment by providing fine-grained control over network traffic.
+    To process a network policies in Kubernetes, what you need usually is the controller that calls the Kubernetes API tha watch for any Kubernetes Network policy and update the BPF map to enforce certain policies, in the following section we will create a very basic Network policy controller that transform user input to eBPF map data.
+
+    ```
+    cp tutorial/labs/kube/* .
+    ```
+
+    Let's review the code, please open the tab `Editor (Network Policy).
+
+    We are now ready to test the code, let's run this script in the background:
+    ```
+    ./process_network_policy.sh &
+    ```
+    Now let's make a quick test, the traffic from sleep to httpbin should have been restored (because of the reset in the script):
+
+
+    ```bash
+    httpbin_pod_ip=`kubectl get pods -l app=httpbin -o=jsonpath='{.items[0].status.podIP}'`
+    kubectl exec deploy/sleep curl $httpbin_pod_ip/get
+    ```
+
+    We should see a response:
+
+    ```
+    kubectl exec [POD] [COMMAND] is DEPRECATED and will be removed in a future version. Use kubectl exec [POD] -- [COMMAND] instead.
+    % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                  Dload  Upload   Total   Spent    Left  Speed
+    100   185  100   185    0     0  84014      0 --:--:-- --:--:-- --:--:-- 92500
+    {
+      "args": {},
+      "headers": {
+        "Accept": "*/*",
+        "Host": "httpbin:8000",
+        "User-Agent": "curl/8.4.0"
+      },
+      "origin": "10.10.0.170",
+      "url": "http://httpbin:8000/get"
+    }
+
+    ```
+
+    but now, if we create the following Network Policy:
+
+    ```bash
+    kubectl apply -f- <<EOF
+    kind: NetworkPolicy
+    apiVersion: networking.k8s.io/v1
+    metadata:
+      name: httpbin
+    spec:
+      podSelector:
+        matchLabels:
+          app: httpbin
+      ingress:
+      - from:
+          - podSelector:
+              matchLabels:
+                app: sleep
+    EOF
+    ```
+
+    After couple seconds, if we test the communication again:
+
+    ```bash
+    httpbin_pod_ip=`kubectl get pods -l app=httpbin -o=jsonpath='{.items[0].status.podIP}'`
+    kubectl exec deploy/sleep curl $httpbin_pod_ip/get
+    ```
+
+    We should not get any response!. this means the network policy got enforce using our basic code.
+
+    Congrats!!! you have finished this tutorial! today we learn the very basics of CNI and eBPF.
+    Thanks you for attending and I hope to see you soon.
+
+
+    Adam
+    Twitter: _asayah
+    Linkedin: https://www.linkedin.com/in/adamsayah/
+  tabs:
+  - title: Terminal
+    type: terminal
+    hostname: master
+  - title: Editor (eBPF -Kernel)
+    type: code
+    hostname: master
+    path: /root/ebpfcni.bpf.c
+  - title: Editor (eBPF - Userspace)
+    type: code
+    hostname: master
+    path: /root/ebpfcni.c
+  - title: Editor (Network Policy)
+    type: code
+    hostname: master
+    path: /root/process_network_policy.sh
+  difficulty: ""
+  timelimit: 3600
+lab_config:
+  overlay: false
+  width: 25
+  position: right
+  enableLoadingMessages: true
+checksum: "12640555095673354440"

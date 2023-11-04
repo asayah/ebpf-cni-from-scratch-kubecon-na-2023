@@ -1,0 +1,31 @@
+#!/bin/bash
+
+
+# STEP1 Let's handle what cmd has been invoked by Kublet
+case $CNI_COMMAND in
+ADD)
+
+;;
+
+DEL)
+    
+;;
+
+GET)
+;;
+
+CHECK)
+;;
+
+VERSION)
+
+;;
+
+*)
+  echo "Not supported: $CNI_COMMAND" 
+  exit 1
+;;
+
+esac
+
+

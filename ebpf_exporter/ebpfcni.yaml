@@ -1,0 +1,9 @@
+metrics:
+  counters:
+    - name: counter
+      help: Number of packets received over IPv4
+      labels:
+        - name: source_addr
+          size: 4
+          decoders:
+            - name: inet_ip
