@@ -74,9 +74,6 @@ DEL)
     rm -rf /var/run/netns/$CNI_CONTAINERID
 ;;
 
-GET)
-;;
-
 CHECK)
 ;;
 
