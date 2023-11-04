@@ -44,7 +44,7 @@ sudo sysctl -w net.ipv6.conf.lo.disable_ipv6=1
 # Apply sysctl params without reboot
 sudo sysctl --system
 
-sudo apt-get install -y apt-transport-https ca-certificates curl prometheus
+sudo apt-get install -y apt-transport-https ca-certificates curl
 sudo mkdir /etc/apt/keyrings || true
 
 echo "deb [signed-by=/etc/apt/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernetes.list
@@ -63,3 +63,4 @@ sudo kubeadm config images pull
 echo 'alias k=kubectl' >> ~/.bashrc
 
 git clone https://github.com/asayah/ebpf-cni-from-scratch-kubecon-na-2023 tutorial 
+sudo apt-get install -y  prometheus

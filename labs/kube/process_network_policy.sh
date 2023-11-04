@@ -7,7 +7,7 @@ while true; do
     #Reset
     for source in $all_ips; do
         for destination in $all_ips; do
-        iprules $source $destination 1
+        ./iprules $source $destination 1
         done
     done
 
@@ -28,7 +28,7 @@ while true; do
     for source in $policy_source_ips; do
         for destination in $policy_destination_ips; do
         echo "blocking $source to $destination"
-        iprules $source $destination 0
+        ./iprules $source $destination 0
         done
     done
     

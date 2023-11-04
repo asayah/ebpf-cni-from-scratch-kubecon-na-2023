@@ -161,10 +161,14 @@ challenges:
 
     ```
 
+    If we check the pods:
+    ```bash
+    kubectl get po
+    ```
+
     You Should see the following:
 
     ```text
-    k get po
     NAME                       READY   STATUS    RESTARTS   AGE
     httpbin-65975d4c6f-d2cp8   0/1     Pending   0          9s
     sleep-7656cf8794-52x28     0/1     Pending   0          6s
@@ -750,4 +754,4 @@ lab_config:
   width: 25
   position: right
   enableLoadingMessages: true
-checksum: "12640555095673354440"
+checksum: "15596579456627957493"
