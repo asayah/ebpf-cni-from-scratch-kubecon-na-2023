@@ -667,7 +667,7 @@ challenges:
     ```
     ./process_network_policy.sh &
     ```
-    Now let's make a quick test, the traffic from sleep to httpbin should have been restored (because of the reset in the script):
+    Now let's make a quick test, the traffic from sleep to httpbin is blocked by default:
 
 
     ```bash
@@ -675,27 +675,17 @@ challenges:
     kubectl exec deploy/sleep curl $httpbin_pod_ip/get
     ```
 
-    We should see a response:
+    We should see no response:
 
     ```
     kubectl exec [POD] [COMMAND] is DEPRECATED and will be removed in a future version. Use kubectl exec [POD] -- [COMMAND] instead.
     % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
                                   Dload  Upload   Total   Spent    Left  Speed
     100   185  100   185    0     0  84014      0 --:--:-- --:--:-- --:--:-- 92500
-    {
-      "args": {},
-      "headers": {
-        "Accept": "*/*",
-        "Host": "httpbin:8000",
-        "User-Agent": "curl/8.4.0"
-      },
-      "origin": "10.10.0.170",
-      "url": "http://httpbin:8000/get"
-    }
 
     ```
 
-    but now, if we create the following Network Policy:
+    But now, if we create the following Network Policy:
 
     ```bash
     kubectl apply -f- <<EOF
@@ -722,7 +712,27 @@ challenges:
     kubectl exec deploy/sleep curl $httpbin_pod_ip/get
     ```
 
-    We should not get any response!. this means the network policy got enforce using our basic code.
+    We should see the following response:
+
+    ```
+    kubectl exec [POD] [COMMAND] is DEPRECATED and will be removed in a future version. Use kubectl exec [POD] -- [COMMAND] instead.
+    % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                  Dload  Upload   Total   Spent    Left  Speed
+    100   185  100   185    0     0  84014      0 --:--:-- --:--:-- --:--:-- 92500
+    {
+      "args": {},
+      "headers": {
+        "Accept": "*/*",
+        "Host": "httpbin:8000",
+        "User-Agent": "curl/8.4.0"
+      },
+      "origin": "10.10.0.170",
+      "url": "http://httpbin:8000/get"
+    }
+
+    ```
+
+    This means our network policy allow the traffic between the two pods.
 
     Congrats!!! you have finished this tutorial! today we learn the very basics of CNI and eBPF.
     Thanks you for attending and I hope to see you soon.
@@ -754,4 +764,4 @@ lab_config:
   width: 25
   position: right
   enableLoadingMessages: true
-checksum: "2432512758290502033"
+checksum: "5364000811329233034"
